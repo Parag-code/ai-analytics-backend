@@ -35,15 +35,9 @@ def ask():
 
         safe_sql = validate_sql(generated_sql)
 
-        with engine.connect() as conn:
-            result = conn.execute(text(safe_sql))
-            rows = [dict(row._mapping) for row in result]
-
         return jsonify({
             "question": question,
-            "generated_sql": safe_sql,
-            "rows_returned": len(rows),
-            "result": rows
+            "generated_sql": safe_sql
         })
 
     except ValueError as ve:
@@ -57,6 +51,7 @@ def ask():
             "error": str(e),
             "generated_sql": generated_sql if "generated_sql" in locals() else None
         }), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

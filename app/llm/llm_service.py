@@ -98,10 +98,18 @@ SQL:
 
 # Extract only first SELECT statement
     import re
-    match = re.search(r"select .*?;", sql, re.IGNORECASE | re.DOTALL)
-    if match:
-      sql = match.group(0).strip()
-    else:
-      raise Exception("Invalid SQL generated")
 
-    return sql
+# clean markdown
+    sql = sql.replace("```sql", "").replace("```", "").strip()
+
+# ensure starts with SELECT
+    if not sql.lower().startswith("select"):
+        raise Exception("Invalid SQL generated")
+
+# remove everything after first semicolon (if exists)
+    if ";" in sql:
+        sql = sql.split(";")[0] + ";"
+    else:
+        sql = sql + ";"
+
+    return sql.strip()
