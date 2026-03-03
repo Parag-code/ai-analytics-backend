@@ -51,28 +51,32 @@ def generate_sql(question: str) -> str:
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
     prompt = f"""
-You are an expert PostgreSQL SQL query generator.
+You are an expert PostgreSQL SQL generator.
 
 {SCHEMA_DESCRIPTION}
 
-ABSOLUTE STRICT RULES:
-- Output MUST start with SELECT
-- Output MUST end with semicolon ;
-- Output ONLY one SQL SELECT statement
+Examples:
+
+User: How many observations are there?
+SQL: SELECT COUNT(*) FROM observation;
+
+User: Show all joint type observations
+SQL: SELECT * FROM observation WHERE TYPE = 'joint';
+
+User: Count observations grouped by TYPE
+SQL: SELECT TYPE, COUNT(*) FROM observation GROUP BY TYPE;
+
+STRICT RULES:
+- Output ONLY SQL
+- Output ONE SELECT statement
 - NO explanation
 - NO markdown
-- NO comments
-- NO MySQL
-- NO text before or after SQL
+- MUST start with SELECT
+- MUST end with semicolon
 - NEVER use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE
 
-If unsure, return:
-SELECT 1;
-
-User Question:
-{question}
-
-Return only SQL:
+User: {question}
+SQL:
 """
 
     response = requests.post(
@@ -89,19 +93,15 @@ Return only SQL:
 
     sql = response.json()["response"].strip()
 
-    sql = sql.replace("```sql", "")
-    sql = sql.replace("```", "")
+# Remove markdown
+    sql = sql.replace("```sql", "").replace("```", "").strip()
 
-    lower_sql = sql.lower()
-    if "select" in lower_sql:
-      sql = sql[lower_sql.index("select"):]
-
-    if ";" in sql:
-      sql = sql.split(";")[0] + ";"
-
-    sql = sql.strip()
-
-    if not sql.lower().startswith("select"):
-      return "SELECT 1;"
+# Extract only first SELECT statement
+    import re
+    match = re.search(r"select .*?;", sql, re.IGNORECASE | re.DOTALL)
+    if match:
+      sql = match.group(0).strip()
+    else:
+      raise Exception("Invalid SQL generated")
 
     return sql
