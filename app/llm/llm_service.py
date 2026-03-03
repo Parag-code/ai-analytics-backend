@@ -2,7 +2,7 @@ import requests
 from datetime import datetime
 
 OLLAMA_URL = "http://ollama:11434/api/generate"
-MODEL_NAME = "tinyllama"
+MODEL_NAME = "codellama:7b-instruct"
 
 SCHEMA_DESCRIPTION = """
 Database Schema:
@@ -43,39 +43,35 @@ REF_START_DATETIME format example:
 """
 
 
+import requests
+import re
+from datetime import datetime
+
+
 def generate_sql(question: str) -> str:
     """
-    Generates SQL query from natural language using local LLM.
+    Generates a safe PostgreSQL SELECT query from natural language using local LLM.
+    Returns only validated SQL.
     """
-
-    today = datetime.utcnow().strftime("%Y-%m-%d")
 
     prompt = f"""
 You are an expert PostgreSQL SQL generator.
 
 {SCHEMA_DESCRIPTION}
 
-Examples:
-
-User: How many observations are there?
-SQL: SELECT COUNT(*) FROM observation;
-
-User: Show all joint type observations
-SQL: SELECT * FROM observation WHERE TYPE = 'joint';
-
-User: Count observations grouped by TYPE
-SQL: SELECT TYPE, COUNT(*) FROM observation GROUP BY TYPE;
-
 STRICT RULES:
-- Output ONLY SQL
-- Output ONE SELECT statement
-- NO explanation
-- NO markdown
-- MUST start with SELECT
-- MUST end with semicolon
-- NEVER use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE
+- Respond with ONLY a single raw SQL SELECT statement.
+- No explanation.
+- No comments.
+- No markdown.
+- Must start with SELECT.
+- Must end with a semicolon.
+- Only use tables and columns defined in schema.
+- Never use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE.
 
-User: {question}
+User Question:
+{question}
+
 SQL:
 """
 
@@ -84,32 +80,60 @@ SQL:
         json={
             "model": MODEL_NAME,
             "prompt": prompt,
-            "stream": False
+            "stream": False,
+            "temperature": 0  # makes SQL deterministic
         }
     )
 
     if response.status_code != 200:
         raise Exception("LLM request failed")
 
-    sql = response.json()["response"].strip()
+    raw_output = response.json()["response"].strip()
 
-# Remove markdown
-    sql = sql.replace("```sql", "").replace("```", "").strip()
+    # -------------------------
+    # 1. Remove markdown blocks
+    # -------------------------
+    cleaned = re.sub(r"```.*?```", "", raw_output, flags=re.DOTALL).strip()
 
-# Extract only first SELECT statement
-    import re
+    # -------------------------
+    # 2. Extract first SELECT statement
+    # -------------------------
+    match = re.search(r"(SELECT[\s\S]*?;)", cleaned, re.IGNORECASE)
 
-# clean markdown
-    sql = sql.replace("```sql", "").replace("```", "").strip()
-
-# ensure starts with SELECT
-    if not sql.lower().startswith("select"):
-        raise Exception("Invalid SQL generated")
-
-# remove everything after first semicolon (if exists)
-    if ";" in sql:
-        sql = sql.split(";")[0] + ";"
+    if match:
+        sql = match.group(1).strip()
     else:
-        sql = sql + ";"
+        # Handle missing semicolon
+        match = re.search(r"(SELECT[\s\S]*)", cleaned, re.IGNORECASE)
+        if match:
+            sql = match.group(1).strip()
+            if not sql.endswith(";"):
+                sql += ";"
+        else:
+            raise Exception("Invalid SQL generated")
 
+    sql_lower = sql.lower()
+
+    # -------------------------
+    # 3. Safety checks
+    # -------------------------
+    forbidden_keywords = [
+        "insert",
+        "update",
+        "delete",
+        "drop",
+        "alter",
+        "truncate",
+        "create"
+    ]
+
+    if any(keyword in sql_lower for keyword in forbidden_keywords):
+        raise Exception("Dangerous SQL detected")
+
+    if not sql_lower.startswith("select"):
+        raise Exception("Only SELECT queries are allowed")
+
+    # -------------------------
+    # 4. Final clean output
+    # -------------------------
     return sql.strip()
