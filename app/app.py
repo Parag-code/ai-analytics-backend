@@ -1,16 +1,17 @@
-from flask import Flask, jsonify
-from database.db import test_connection
 from flask import Flask, request, jsonify
 from sqlalchemy import text
-from database.db import engine
+
+from database.db import test_connection, engine
 from llm.llm_service import generate_sql
 from services.sql_validator import validate_sql
 
 app = Flask(__name__)
 
+
 @app.route("/")
 def health():
     return jsonify({"status": "Backend Running"})
+
 
 @app.route("/db-test")
 def db_test():
@@ -19,6 +20,7 @@ def db_test():
         return jsonify({"database_status": f"Connected, result: {result}"})
     except Exception as e:
         return jsonify({"error": str(e)})
+
 
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -31,13 +33,22 @@ def ask():
     question = data["question"]
 
     try:
+        # 1️⃣ Generate SQL from LLM
         generated_sql = generate_sql(question)
 
+        # 2️⃣ Validate SQL
         safe_sql = validate_sql(generated_sql)
+
+        # 3️⃣ Execute SQL in database
+        with engine.connect() as conn:
+            result = conn.execute(text(safe_sql))
+            rows = [dict(row._mapping) for row in result]
 
         return jsonify({
             "question": question,
-            "generated_sql": safe_sql
+            "generated_sql": safe_sql,
+            "rows_returned": len(rows),
+            "result": rows
         })
 
     except ValueError as ve:

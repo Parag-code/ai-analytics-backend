@@ -19,19 +19,18 @@ def validate_sql(sql: str) -> str:
     """
     Validates LLM generated SQL.
     Only SELECT queries are allowed.
-    Also auto-inject LIMIT if missing.
+    No automatic LIMIT injection.
     """
 
     sql_clean = sql.strip().lower()
 
+    # Only SELECT allowed
     if not sql_clean.startswith("select"):
         raise ValueError("Only SELECT queries are allowed.")
 
+    # Block dangerous keywords
     for word in FORBIDDEN_KEYWORDS:
         if re.search(rf"\b{word}\b", sql_clean):
             raise ValueError(f"Forbidden keyword detected: {word}")
 
-    if "limit" not in sql_clean:
-        sql = sql.rstrip(";") + " LIMIT 50;"
-
-    return sql
+    return sql.strip()
