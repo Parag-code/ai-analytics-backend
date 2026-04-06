@@ -1,12 +1,11 @@
-from sqlalchemy import text
+from sqlalchemy import inspect
 from database.db import engine
 
 SCHEMA_CACHE = None
 
-
 def load_schema():
     """
-    Load database schema dynamically and cache it
+    Universal schema loader (PostgreSQL, MySQL, SQLite)
     """
 
     global SCHEMA_CACHE
@@ -16,30 +15,20 @@ def load_schema():
 
     print("Loading schema from database...")
 
-    query = """
-    SELECT table_name, column_name
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-    ORDER BY table_name, ordinal_position;
-    """
-
     schema = {}
 
     try:
-        with engine.connect() as conn:
-            result = conn.execute(text(query))
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
 
-            for row in result:
-                table = row.table_name
-                column = row.column_name
+        for table in tables:
+            columns = inspector.get_columns(table)
+            schema[table] = [col["name"] for col in columns]
 
-                if table not in schema:
-                    schema[table] = []
-
-                schema[table].append(column)
+        if not schema:
+            raise Exception("No tables found in database")
 
         SCHEMA_CACHE = schema
-
         return SCHEMA_CACHE
 
     except Exception as e:

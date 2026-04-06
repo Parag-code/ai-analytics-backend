@@ -2,6 +2,7 @@ import requests
 import os
 from dotenv import load_dotenv
 from services.table_relevance import detect_relevant_tables
+from database.db import engine
 
 import re
 import logging
@@ -40,10 +41,10 @@ def build_schema_description(schema, max_tables=15):
 
 def generate_sql(question: str, schema: dict) -> str:
     """
-    Generate a safe PostgreSQL SELECT query from natural language using local LLM.
+    Generate a safe SQL SELECT query compatible with the database 
     Returns a validated SQL statement.
     """
-
+    db_type = engine.url.get_backend_name()
     relevant_tables = detect_relevant_tables(question)
 
     filtered_schema = {
@@ -58,8 +59,7 @@ def generate_sql(question: str, schema: dict) -> str:
     SCHEMA_DESCRIPTION = build_schema_description(filtered_schema)
 
     prompt = f"""
-You are a world-class PostgreSQL SQL generator.
-
+You are a world-class {db_type} SQL generator.
 Your job is to convert natural language questions into SQL queries.
 
 ====================
@@ -81,9 +81,10 @@ RULES
 7. Only use tables and columns from the schema.
 8. NEVER generate INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE.
 9. If the question asks "how many" or "count", use COUNT(*) and DO NOT use LIMIT.
-10. If the question asks for latest rows, order by REF_START_DATETIME DESC.
+10. If the question asks for latest rows, order by a timestamp column if available.
 11. If user specifies number of rows (example: 5, 10), use LIMIT.
 12. If user says "ordered by", do not assume ASC or DESC unless specified.
+13. Use SQL syntax compatible with {db_type}.
 
 IMPORTANT RULE:
 If the question asks "how many" or "count", generate:
@@ -203,7 +204,8 @@ SQL:
     sql = re.sub(r"\s+", " ", sql).strip()
 
     if "limit" not in sql_lower and "count(" not in sql_lower:
-        sql = sql.rstrip(";") + " LIMIT 50;"
+        if db_type in ["postgresql", "mysql", "sqlite"]:
+            sql = sql.rstrip(";") + " LIMIT 50;"
 
     logger.info(f"Generated SQL: {sql}")
 
