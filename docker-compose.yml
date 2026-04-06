@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+
+  backend:
+    build:
+      context: .
+    container_name: flask_backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: always
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./start-ollama.sh:/start-ollama.sh
+    restart: always
+    env_file:
+      - .env
+    entrypoint: ["/bin/sh", "/start-ollama.sh"]
+
+volumes:
+  ollama_data:

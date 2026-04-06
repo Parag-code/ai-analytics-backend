@@ -4,8 +4,17 @@ from sqlalchemy import text
 from database.db import test_connection, engine
 from llm.llm_service import generate_sql
 from services.sql_validator import validate_sql
+from database.schema_loader import load_schema
 
 app = Flask(__name__)
+
+try:
+    print("Loading schema...")
+    SCHEMA_CACHE = load_schema()
+    print("Schema loaded successfully")
+except Exception as e:
+    print(f"Schema load failed: {e}")
+    SCHEMA_CACHE = {}
 
 
 @app.route("/")
@@ -19,11 +28,17 @@ def db_test():
         result = test_connection()
         return jsonify({"database_status": f"Connected, result: {result}"})
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({
+            "error": str(e),
+            "hint": "Check database credentials in .env"
+        }), 500
 
 
 @app.route("/ask", methods=["POST"])
 def ask():
+
+    if not SCHEMA_CACHE:
+        return jsonify({"error": "Schema not loaded"}), 500
 
     data = request.get_json()
 
@@ -32,17 +47,16 @@ def ask():
 
     question = data["question"]
 
-    try:
-        # 1️⃣ Generate SQL from LLM
-        generated_sql = generate_sql(question)
+    print(f"Question: {question}")
 
-        # 2️⃣ Validate SQL
+    try:
+        generated_sql = generate_sql(question, SCHEMA_CACHE)
+
         safe_sql = validate_sql(generated_sql)
 
-        # 3️⃣ Execute SQL in database
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             result = conn.execute(text(safe_sql))
-            rows = [dict(row._mapping) for row in result]
+            rows = [dict(row._mapping) for row in result][:100]  # limit rows
 
         return jsonify({
             "question": question,
@@ -60,7 +74,8 @@ def ask():
     except Exception as e:
         return jsonify({
             "error": str(e),
-            "generated_sql": generated_sql if "generated_sql" in locals() else None
+            "generated_sql": generated_sql if "generated_sql" in locals() else None,
+            "hint": "Check DB connection, schema, or LLM service"
         }), 500
 
 

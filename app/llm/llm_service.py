@@ -1,61 +1,61 @@
 import requests
-from datetime import datetime
+import os
+from dotenv import load_dotenv
+from services.table_relevance import detect_relevant_tables
 
-OLLAMA_URL = "http://ollama:11434/api/generate"
-MODEL_NAME = "deepseek-coder:1.3b"
-
-SCHEMA_DESCRIPTION = """
-Database Schema:
-
-Table: observation
-Columns:
-- REFOBS_ID (text)
-- TYPE (text)
-- REF_START_DATETIME (text)
-- REF_END_DATETIME (text)
-- ALONG_TRACK_TIME_OFFSET (bigint)
-- LSAR_SQUINT_TIME_OFFSET (bigint)
-- SSAR_SQUINT_TIME_OFFSET (bigint)
-- LSAR_JOINT_OP_TIME_OFFSET (bigint)
-- SSAR_JOINT_OP_TIME_OFFSET (bigint)
-- PRIORITY (text)
-- CMD_LSAR_START_DATETIME (text)
-- CMD_LSAR_END_DATETIME (text)
-- CMD_SSAR_START_DATETIME (text)
-- CMD_SSAR_END_DATETIME (text)
-- LSAR_PATH (text)
-- SSAR_PATH (text)
-- LSAR_CONFIG_ID (integer)
-- SSAR_CONFIG_ID (integer)
-- DATATAKE_ID (text)
-- SEGMENT_DATATAKE_ON_SSR (text)
-- OBS_SUPPORT (text)
-- INTRODUCED_IN (text)
-
-Table: session_observation
-Columns:
-- SESS_ID (text)
-- REFOBS_ID (text)
-
-Important:
-REF_START_DATETIME format example:
-2026-047T04:58:00.8437897
-"""
-
-
-import requests
 import re
 import logging
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+OLLAMA_URL = os.getenv("OLLAMA_URL")
 
-def generate_sql(question: str) -> str:
+if not OLLAMA_URL:
+    raise ValueError("OLLAMA_URL not set in environment")
+
+OLLAMA_URL = OLLAMA_URL + "/api/generate"
+
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-coder:1.3b")
+
+def build_schema_description(schema, max_tables=15):
+
+    parts = []
+
+    for i, (table, columns) in enumerate(schema.items()):
+
+        if i >= max_tables:
+            break
+
+        parts.append(f"\nTable: {table}")
+        parts.append("Columns:")
+
+        for col in columns[:10]:
+            parts.append(f"- {col}")
+
+    return "\n".join(parts)
+
+
+def generate_sql(question: str, schema: dict) -> str:
     """
     Generate a safe PostgreSQL SELECT query from natural language using local LLM.
     Returns a validated SQL statement.
     """
+
+    relevant_tables = detect_relevant_tables(question)
+
+    filtered_schema = {
+        table: schema[table]
+        for table in relevant_tables
+        if table in schema
+    }
+
+    if not filtered_schema:
+        filtered_schema = schema
+
+    SCHEMA_DESCRIPTION = build_schema_description(filtered_schema)
 
     prompt = f"""
 You are a world-class PostgreSQL SQL generator.
@@ -84,6 +84,7 @@ RULES
 10. If the question asks for latest rows, order by REF_START_DATETIME DESC.
 11. If user specifies number of rows (example: 5, 10), use LIMIT.
 12. If user says "ordered by", do not assume ASC or DESC unless specified.
+
 IMPORTANT RULE:
 If the question asks "how many" or "count", generate:
 SELECT COUNT(*) FROM observation;
@@ -136,35 +137,34 @@ SQL:
                     "num_predict": 120
                 }
             },
-            timeout=120
+            timeout=30
         )
 
         if response.status_code != 200:
-            raise Exception("LLM request failed")
+            raise Exception(f"LLM request failed with status {response.status_code}")
 
-        raw_output = response.json()["response"].strip()
+        data = response.json()
+        raw_output = data.get("response", "").strip()
+
+        if not raw_output:
+            raise Exception("Empty response from LLM")
         logger.info("LLM RAW OUTPUT: %s", raw_output)
 
     except Exception as e:
         logger.error("LLM call failed: %s", str(e))
         raise
 
-    # --------------------------------
-    # Remove markdown blocks
-    # --------------------------------
     cleaned = re.sub(r"```.*?```", "", raw_output, flags=re.DOTALL).strip()
 
-    # --------------------------------
-    # Remove common prefixes
-    # --------------------------------
     cleaned = re.sub(r"(?i)sql\s*statement\s*:", "", cleaned)
     cleaned = re.sub(r"(?i)here\s+is\s+the\s+sql\s*:", "", cleaned)
     cleaned = cleaned.strip()
 
-    # --------------------------------
-    # Extract SQL query
-    # --------------------------------
-    match = re.search(r"select\s+.*?;", cleaned, re.IGNORECASE | re.DOTALL)
+    match = re.search(
+        r"(select\s+.*?;)",
+        cleaned,
+        re.IGNORECASE | re.DOTALL
+    )
 
     if match:
         sql = match.group(0).strip()
@@ -180,15 +180,9 @@ SQL:
 
     sql_lower = sql.lower()
 
-    # --------------------------------
-    # Remove LIMIT from COUNT queries
-    # --------------------------------
     if "count(" in sql_lower:
         sql = re.sub(r"\s+limit\s+\d+", "", sql, flags=re.IGNORECASE)
 
-    # --------------------------------
-    # Security checks
-    # --------------------------------
     forbidden_keywords = [
         "insert",
         "update",
@@ -199,15 +193,18 @@ SQL:
         "create"
     ]
 
-    if any(keyword in sql_lower for keyword in forbidden_keywords):
-        raise Exception("Dangerous SQL detected")
+    for keyword in forbidden_keywords:
+      if re.search(rf"\b{keyword}\b", sql_lower):
+        raise Exception(f"Dangerous SQL detected: {keyword}")
 
     if not sql_lower.startswith("select"):
         raise Exception("Only SELECT queries are allowed")
 
-    # --------------------------------
-    # Normalize whitespace
-    # --------------------------------
     sql = re.sub(r"\s+", " ", sql).strip()
+
+    if "limit" not in sql_lower and "count(" not in sql_lower:
+        sql = sql.rstrip(";") + " LIMIT 50;"
+
+    logger.info(f"Generated SQL: {sql}")
 
     return sql
