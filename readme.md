@@ -144,7 +144,7 @@ curl -X POST http://localhost:5000/ask \
 1. User sends a natural language query
 2. LLM converts it into SQL
 3. SQL is validated (safe queries only)
-4. Query executes on PostgreSQL
+4. Query executes on Database
 5. Results are returned as JSON
 
 ---
