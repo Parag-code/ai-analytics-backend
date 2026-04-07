@@ -1,6 +1,6 @@
 # AI Analytics Backend – LLM Powered SQL Generator
 
-An intelligent backend system that converts natural language queries into SQL using a local LLM (Ollama) and executes them securely on a PostgreSQL database.
+An intelligent backend system that converts natural language queries into SQL using a local LLM (Ollama) and executes them securely on a database.
 
 ---
 
@@ -11,7 +11,7 @@ An intelligent backend system that converts natural language queries into SQL us
 * Secure SQL validation (only SELECT allowed)
 * Dockerized setup (plug & play)
 * Automatic LLM model download (Ollama)
-* Works with any PostgreSQL database
+* Works with multiple databases (PostgreSQL, MySQL, SQLite)
 
 ---
 
@@ -19,7 +19,7 @@ An intelligent backend system that converts natural language queries into SQL us
 
 * Python (Flask)
 * SQLAlchemy
-* PostgreSQL
+* Databases: PostgreSQL / MySQL / SQLite
 * Ollama (Local LLM)
 * Docker & Docker Compose
 
@@ -63,7 +63,7 @@ Edit `.env`:
 
 ```
 DB_HOST=your_host
-DB_PORT=5432
+DB_PORT=your_port
 DB_NAME=your_db
 DB_USER=your_user
 DB_PASSWORD=your_password
@@ -71,6 +71,12 @@ DB_PASSWORD=your_password
 OLLAMA_URL=http://ollama:11434
 MODEL_NAME=deepseek-coder:1.3b
 ```
+
+👉 Supports:
+
+* PostgreSQL (default port: 5432)
+* MySQL (default port: 3306)
+* SQLite (use DB_NAME as file name)
 
 ---
 
@@ -136,6 +142,7 @@ curl -X POST http://localhost:5000/ask \
 ## Important Notes
 
 * Only **SELECT** queries are allowed
+* Database type is automatically detected at runtime
 
 ---
 
@@ -144,7 +151,7 @@ curl -X POST http://localhost:5000/ask \
 1. User sends a natural language query
 2. LLM converts it into SQL
 3. SQL is validated (safe queries only)
-4. Query executes on Database
+4. Query executes on connected database
 5. Results are returned as JSON
 
 ---
