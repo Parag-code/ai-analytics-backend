@@ -13,12 +13,47 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
     raise ValueError("Database environment variables are not properly set")
 
-DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+def build_db_url():
+
+    # Try PostgreSQL
+    try:
+        url = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("Connected using PostgreSQL")
+        return url
+    except:
+        pass
+
+    # Try MySQL
+    try:
+        url = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("Connected using MySQL")
+        return url
+    except:
+        pass
+
+    # Try SQLite (file-based)
+    try:
+        url = f"sqlite:///{DB_NAME}"
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("Connected using SQLite")
+        return url
+    except:
+        pass
+
+    raise Exception("Could not connect to any supported database")
+
+DATABASE_URL = build_db_url()
 
 engine = create_engine(
     DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
     pool_pre_ping=True
 )
 
